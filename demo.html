@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NyoNyo AI</title>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f0eeff;
+      color: #2d2d4e;
+      min-height: 100vh;
+    }
+
+    /* ── Layout ── */
+    .app-wrapper {
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 28px 16px 120px;
+    }
+
+    /* ── Header ── */
+    .app-header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .app-header h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #7b6fd4, #5bc8c8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+    .app-header p {
+      color: #8880bb;
+      font-size: 0.88rem;
+      margin-top: 4px;
+    }
+
+    /* ── Clock ── */
+    .clock-card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 18px 20px;
+      box-shadow: 0 4px 18px rgba(123,111,212,0.10);
+      text-align: center;
+      margin-bottom: 22px;
+    }
+    .clock-display {
+      font-size: 2.6rem;
+      font-weight: 700;
+      color: #6b5ecc;
+      letter-spacing: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .clock-date {
+      font-size: 0.82rem;
+      color: #9d96cb;
+      margin-top: 4px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 22px 20px;
+      box-shadow: 0 4px 18px rgba(123,111,212,0.10);
+      margin-bottom: 20px;
+    }
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #5a4fb0;
+      margin-bottom: 16px;
+    }
+
+    /* ── Form ── */
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #7b6fd4;
+      margin-bottom: 5px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 2px solid #e2deff;
+      border-radius: 12px;
+      font-size: 0.95rem;
+      color: #2d2d4e;
+      background: #faf9ff;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus { border-color: #a090e8; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary {
+      background: linear-gradient(135deg, #7b6fd4, #5bc8c8);
+      color: #fff;
+      width: 100%;
+      justify-content: center;
+      padding: 12px;
+      font-size: 0.95rem;
+    }
+    .btn-demo {
+      background: linear-gradient(135deg, #f7a8d0, #f7c8e8);
+      color: #7b2d5a;
+      width: 100%;
+      justify-content: center;
+      padding: 12px;
+      font-size: 0.95rem;
+      margin-top: 8px;
+    }
+    .btn:hover { opacity: 0.88; }
+
+    /* ── Reminder List ── */
+    .reminder-list { list-style: none; }
+    .reminder-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: #f5f3ff;
+      border-radius: 12px;
+      margin-bottom: 8px;
+      gap: 10px;
+    }
+    .reminder-info { flex: 1; min-width: 0; }
+    .reminder-name {
+      font-weight: 600;
+      font-size: 0.92rem;
+      color: #2d2d4e;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .reminder-time {
+      font-size: 0.78rem;
+      color: #8880bb;
+      margin-top: 1px;
+    }
+    .btn-delete {
+      background: #ffe4ef;
+      color: #c0366a;
+      border: none;
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .btn-delete:hover { background: #ffc8dd; }
+    .empty-state {
+      text-align: center;
+      color: #b0aad8;
+      font-size: 0.85rem;
+      padding: 10px 0;
+    }
+
+    /* ── NyoNyo Character (fixed bottom-right) ── */
+    #nyonyo-container {
+      position: fixed;
+      bottom: 28px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+      z-index: 999;
+      pointer-events: none;
+    }
+
+    /* Speech Bubble */
+    #speech-bubble {
+      background: #fff;
+      border: 2px solid #c5bdf8;
+      border-radius: 18px 18px 4px 18px;
+      padding: 12px 16px;
+      max-width: 230px;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: #4a3f9e;
+      font-weight: 600;
+      box-shadow: 0 4px 14px rgba(123,111,212,0.18);
+      opacity: 0;
+      transform: translateY(10px) scale(0.95);
+      transition: opacity 0.35s ease, transform 0.35s ease;
+      pointer-events: none;
+    }
+    #speech-bubble.visible {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    /* Robot SVG wrapper */
+    #nyonyo-bot {
+      width: 80px;
+      height: 80px;
+      animation: float 3.4s ease-in-out infinite;
+      filter: drop-shadow(0 6px 14px rgba(123,111,212,0.28));
+      transition: transform 0.3s;
+    }
+    #nyonyo-bot.excited {
+      animation: excited 0.5s ease-in-out 3, float 3.4s ease-in-out infinite 1.5s;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50%       { transform: translateY(-10px); }
+    }
+    @keyframes excited {
+      0%   { transform: translateY(0) rotate(0deg) scale(1); }
+      25%  { transform: translateY(-14px) rotate(-8deg) scale(1.08); }
+      50%  { transform: translateY(-4px) rotate(8deg) scale(1.05); }
+      75%  { transform: translateY(-10px) rotate(-4deg) scale(1.08); }
+      100% { transform: translateY(0) rotate(0deg) scale(1); }
+    }
+
+    /* Eyes blink */
+    .bot-eye-l, .bot-eye-r {
+      animation: blink 4s ease-in-out infinite;
+    }
+    .bot-eye-r { animation-delay: 0.1s; }
+    @keyframes blink {
+      0%, 94%, 100% { transform: scaleY(1); }
+      96%           { transform: scaleY(0.08); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="app-wrapper">
+  <!-- Header -->
+  <header class="app-header">
+    <h1>🌸 NyoNyo AI</h1>
+    <p>Pengingat belajar yang lucu & semangat! ✨</p>
+  </header>
+
+  <!-- Clock -->
+  <div class="clock-card">
+    <div class="clock-display" id="clock-display">00:00:00</div>
+    <div class="clock-date" id="clock-date"></div>
+  </div>
+
+  <!-- Add Reminder Form -->
+  <div class="card">
+    <h2>➕ Tambah Pengingat</h2>
+    <div class="form-group">
+      <label for="activity-name">Nama Aktivitas</label>
+      <input type="text" id="activity-name" placeholder="contoh: Belajar Matematika" maxlength="60" />
+    </div>
+    <div class="form-group">
+      <label for="reminder-time">Waktu Pengingat</label>
+      <input type="time" id="reminder-time" />
+    </div>
+    <button id="btn-save" class="btn btn-primary">💾 Simpan Pengingat</button>
+    <button id="btn-demo" class="btn btn-demo">🎀 Test Reminder (Demo)</button>
+  </div>
+
+  <!-- Reminder List -->
+  <div class="card">
+    <h2>📋 Daftar Pengingat</h2>
+    <ul class="reminder-list" id="reminder-list"></ul>
+  </div>
+</div>
+
+<!-- NyoNyo Character -->
+<div id="nyonyo-container">
+  <div id="speech-bubble" aria-live="polite"></div>
+  <!-- Inline SVG robot -->
+  <svg id="nyonyo-bot" viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg" aria-label="NyoNyo AI character" role="img">
+    <!-- Antenna stem -->
+    <line x1="50" y1="12" x2="50" y2="24" stroke="#a0d8b0" stroke-width="3" stroke-linecap="round"/>
+    <!-- Antenna sprout -->
+    <ellipse cx="50" cy="9" rx="6" ry="7" fill="#6fcf97" />
+    <ellipse cx="45" cy="6" rx="4" ry="3" fill="#a8e6c1" transform="rotate(-20 45 6)"/>
+    <ellipse cx="55" cy="6" rx="4" ry="3" fill="#a8e6c1" transform="rotate(20 55 6)"/>
+
+    <!-- Head -->
+    <rect x="22" y="22" width="56" height="48" rx="18" ry="18" fill="#c9c4f7"/>
+    <!-- Head shine -->
+    <ellipse cx="38" cy="30" rx="8" ry="4" fill="#e8e5ff" opacity="0.6"/>
+
+    <!-- Eye sockets -->
+    <ellipse cx="38" cy="44" rx="9" ry="10" fill="#fff"/>
+    <ellipse cx="62" cy="44" rx="9" ry="10" fill="#fff"/>
+    <!-- Pupils -->
+    <ellipse class="bot-eye-l" cx="38" cy="44" rx="5" ry="5.5" fill="#6b5ecc" style="transform-origin:38px 44px;"/>
+    <ellipse class="bot-eye-r" cx="62" cy="44" rx="5" ry="5.5" fill="#6b5ecc" style="transform-origin:62px 44px;"/>
+    <!-- Pupils shine -->
+    <circle cx="40" cy="42" r="1.8" fill="#fff"/>
+    <circle cx="64" cy="42" r="1.8" fill="#fff"/>
+
+    <!-- Blush -->
+    <ellipse cx="28" cy="54" rx="6" ry="3.5" fill="#f7b8d0" opacity="0.7"/>
+    <ellipse cx="72" cy="54" rx="6" ry="3.5" fill="#f7b8d0" opacity="0.7"/>
+
+    <!-- Smile -->
+    <path d="M 40 58 Q 50 66 60 58" stroke="#7b6fd4" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+    <!-- Body -->
+    <rect x="30" y="68" width="40" height="30" rx="14" ry="14" fill="#b8b0f0"/>
+    <!-- Body panel -->
+    <rect x="38" y="74" width="24" height="16" rx="7" ry="7" fill="#d8d4ff"/>
+    <!-- Body light -->
+    <circle cx="50" cy="82" r="4" fill="#5bc8c8" opacity="0.8"/>
+
+    <!-- Arms -->
+    <rect x="10" y="70" width="22" height="12" rx="6" fill="#c9c4f7"/>
+    <rect x="68" y="70" width="22" height="12" rx="6" fill="#c9c4f7"/>
+    <!-- Hand blobs -->
+    <circle cx="14" cy="76" r="6" fill="#b8b0f0"/>
+    <circle cx="86" cy="76" r="6" fill="#b8b0f0"/>
+
+    <!-- Feet -->
+    <ellipse cx="40" cy="100" rx="9" ry="5" fill="#b8b0f0"/>
+    <ellipse cx="60" cy="100" rx="9" ry="5" fill="#b8b0f0"/>
+  </svg>
+</div>
+
+<script src="demo.js" defer></script>
+</body>
+</html>

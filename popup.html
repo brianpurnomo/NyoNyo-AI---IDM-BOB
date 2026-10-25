@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>NyoNyo AI</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f5f3ff;
+      color: #2d2d4e;
+      width: 320px;
+      padding: 16px;
+    }
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .header svg { flex-shrink: 0; }
+    .header h1 {
+      font-size: 1.1rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #7b6fd4, #5bc8c8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    /* Form */
+    .form-group { margin-bottom: 10px; }
+    .form-group label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #7b6fd4;
+      margin-bottom: 3px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 8px 11px;
+      border: 2px solid #e2deff;
+      border-radius: 10px;
+      font-size: 0.88rem;
+      color: #2d2d4e;
+      background: #faf9ff;
+      outline: none;
+    }
+    .form-group input:focus { border-color: #a090e8; }
+    /* Buttons */
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      width: 100%;
+      padding: 9px;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.86rem;
+      font-weight: 700;
+      cursor: pointer;
+      margin-bottom: 7px;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.87; }
+    .btn-primary { background: linear-gradient(135deg,#7b6fd4,#5bc8c8); color:#fff; }
+    .btn-demo    { background: linear-gradient(135deg,#f7a8d0,#f7c8e8); color:#7b2d5a; }
+    /* List */
+    .section-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #5a4fb0;
+      margin: 12px 0 6px;
+    }
+    .reminder-list { list-style: none; }
+    .reminder-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      background: #fff;
+      border-radius: 10px;
+      margin-bottom: 5px;
+      gap: 8px;
+    }
+    .r-name {
+      font-weight: 600;
+      font-size: 0.82rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+    .r-time { font-size: 0.72rem; color: #8880bb; }
+    .btn-del {
+      background: #ffe4ef;
+      color: #c0366a;
+      border: none;
+      border-radius: 7px;
+      padding: 3px 8px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .empty { text-align:center; color:#b0aad8; font-size:0.78rem; padding:6px 0; }
+    .status { font-size:0.72rem; color:#7b6fd4; text-align:center; margin-top:4px; min-height:16px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <!-- Mini NyoNyo SVG -->
+    <svg width="34" height="38" viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg">
+      <line x1="50" y1="12" x2="50" y2="24" stroke="#a0d8b0" stroke-width="3" stroke-linecap="round"/>
+      <ellipse cx="50" cy="9" rx="6" ry="7" fill="#6fcf97"/>
+      <rect x="22" y="22" width="56" height="48" rx="18" fill="#c9c4f7"/>
+      <ellipse cx="38" cy="44" rx="9" ry="10" fill="#fff"/>
+      <ellipse cx="62" cy="44" rx="9" ry="10" fill="#fff"/>
+      <ellipse cx="38" cy="44" rx="5" ry="5.5" fill="#6b5ecc"/>
+      <ellipse cx="62" cy="44" rx="5" ry="5.5" fill="#6b5ecc"/>
+      <circle cx="40" cy="42" r="1.8" fill="#fff"/>
+      <circle cx="64" cy="42" r="1.8" fill="#fff"/>
+      <ellipse cx="28" cy="54" rx="6" ry="3.5" fill="#f7b8d0" opacity="0.7"/>
+      <ellipse cx="72" cy="54" rx="6" ry="3.5" fill="#f7b8d0" opacity="0.7"/>
+      <path d="M 40 58 Q 50 66 60 58" stroke="#7b6fd4" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      <rect x="30" y="68" width="40" height="30" rx="14" fill="#b8b0f0"/>
+    </svg>
+    <h1>NyoNyo AI 🌸</h1>
+  </div>
+
+  <!-- Add form -->
+  <div class="form-group">
+    <label for="p-name">Nama Aktivitas</label>
+    <input type="text" id="p-name" placeholder="Belajar Matematika…" maxlength="60"/>
+  </div>
+  <div class="form-group">
+    <label for="p-time">Waktu</label>
+    <input type="time" id="p-time"/>
+  </div>
+  <button class="btn btn-primary" id="btn-save">💾 Simpan Pengingat</button>
+  <button class="btn btn-demo"    id="btn-demo">🎀 Test Sekarang (Demo)</button>
+  <div class="status" id="status"></div>
+
+  <!-- List -->
+  <div class="section-title">📋 Daftar Pengingat</div>
+  <ul class="reminder-list" id="r-list"></ul>
+
+  <script src="popup.js"></script>
+</body>
+</html>
