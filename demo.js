@@ -33,24 +33,8 @@ function sendExt(msg) {
   });
 }
 
-function syncToExtension() {
-  if (!EXT_ACTIVE) return;
-  try {
-    chrome.storage.sync.set({ [STORAGE_KEY]: reminders }, () => {
-      if (chrome.runtime.lastError) {
-        console.warn('[NyoNyo] syncToExtension storage error:', chrome.runtime.lastError.message);
-        return;
-      }
-      console.log('[NyoNyo] Synced', reminders.length, 'reminder(s) to chrome.storage.sync');
-      sendExt({ type: 'REGISTER_ALARMS' });
-    });
-  } catch (err) {
-    console.warn('[NyoNyo] syncToExtension threw (non-extension origin?):', err.message);
-  }
-}
-
 // ── State ──────────────────────────────────────────────────────────────────────
-let reminders   = loadReminders();
+let reminders   = [];
 let triggered   = loadTriggered();
 let bubbleTimer = null;
 
@@ -70,14 +54,22 @@ function updateClock() {
 }
 
 // ── localStorage helpers ───────────────────────────────────────────────────────
-function loadReminders() {
+async function loadReminders() {
+  if (EXT_ACTIVE) {
+    const r = await chrome.storage.local.get(STORAGE_KEY);
+    return r[STORAGE_KEY] || [];
+  }
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
   catch { return []; }
 }
 
-function persistReminders() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(reminders));
-  syncToExtension();
+async function persistReminders() {
+  if (EXT_ACTIVE) {
+    await chrome.storage.local.set({ [STORAGE_KEY]: reminders });
+    sendExt({ type: 'REGISTER_ALARMS' });
+  } else {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(reminders));
+  }
 }
 
 function loadTriggered() {
@@ -110,6 +102,10 @@ function saveReminder() {
   if (!name) { alert('Masukkan nama aktivitas dulu ya! 🌸'); nameEl.focus(); return; }
   if (!time) { alert('Pilih waktu pengingat dulu ya! ⏰'); timeEl.focus(); return; }
 
+  if (!EXT_ACTIVE) {
+    alert('Halaman ini dibuka di luar extension, jadi jadwal TIDAK akan sampai ke extension.\n' +
+          'Buka lewat chrome-extension://<ID-extension>/demo.html');
+  }
   const id = Date.now().toString(36);
   reminders.push({ id, name, time });
   persistReminders();
@@ -197,9 +193,18 @@ function animateBot() {
 }
 
 // ── Init (runs after DOM is ready via defer) ───────────────────────────────────
-renderList();
 updateClock();
-syncToExtension();
+loadReminders().then(list => { reminders = list; renderList(); });
+
+// Jika popup mengubah jadwal, halaman ini ikut diperbarui
+if (EXT_ACTIVE) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes[STORAGE_KEY]) {
+      reminders = changes[STORAGE_KEY].newValue || [];
+      renderList();
+    }
+  });
+}
 
 // Register static button listeners
 document.getElementById('btn-save').addEventListener('click', saveReminder);
