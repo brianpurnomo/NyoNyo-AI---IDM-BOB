@@ -1,70 +1,55 @@
 // ── NyoNyo AI Extension — Background Service Worker ──────────────────────────
-// Manages chrome.alarms for each saved reminder.
-// When an alarm fires it opens (or reuses) reminder.html as a new tab.
-// Three-stage escalation is tracked in chrome.storage.session (per browser session).
+// Satu alarm "nyonyo|check" berdetak tiap menit. Setiap tick memeriksa semua
+// pengingat di chrome.storage.local dan membuka jendela popup reminder.html.
+// Eskalasi 3 tahap dicatat di chrome.storage.session (per sesi browser).
+'use strict';
 
-const STORAGE_KEY   = 'nyonyo_reminders';   // same key used by demo.html / popup
-const STAGE_KEY     = 'nyonyo_stages';       // session storage: { "id|date": stageNumber }
+const STORAGE_KEY   = 'nyonyo_reminders';   // chrome.storage.local (dipakai popup, demo, background)
+const STAGE_KEY     = 'nyonyo_stages';      // session: { "id|tanggal": { stage, at } }
+const SNOOZE_KEY    = 'nyonyo_snoozes';     // session: { "nyonyo|snooze|id": { reminder, stage } }
+const CHECK_ALARM   = 'nyonyo|check';
 const REMINDER_PAGE = chrome.runtime.getURL('reminder.html');
 
+const STAGE_GAP_MIN = 5;    // jeda antar tahap eskalasi (menit)
+const WINDOW_MIN    = 30;   // jika browser telat dibuka > 30 menit dari jadwal, hari itu dilewati
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+const pad = n => String(n).padStart(2, '0');
 
 function todayStr() {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function hhmm(date) {
-  return `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
-}
-
-// Read reminders from chrome.storage.sync
 async function getReminders() {
-  return new Promise(resolve => {
-    chrome.storage.sync.get([STORAGE_KEY], result => {
-      resolve(result[STORAGE_KEY] || []);
-    });
-  });
+  const r = await chrome.storage.local.get(STORAGE_KEY);
+  return r[STORAGE_KEY] || [];
 }
 
-// Read per-session stage counters
-async function getStages() {
-  return new Promise(resolve => {
-    chrome.storage.session.get([STAGE_KEY], result => {
-      resolve(result[STAGE_KEY] || {});
-    });
-  });
+async function getSession(key) {
+  const r = await chrome.storage.session.get(key);
+  return r[key] || {};
 }
 
-async function setStages(stages) {
-  return new Promise(resolve => {
-    chrome.storage.session.set({ [STAGE_KEY]: stages }, resolve);
-  });
+function setSession(key, value) {
+  return chrome.storage.session.set({ [key]: value });
 }
 
-// ── Alarm registration ────────────────────────────────────────────────────────
-
-// Register one alarm per reminder. Alarm name = reminder id.
-// chrome.alarms uses absolute epoch milliseconds for the first fire,
-// then repeats every 24 h if desired.  We set a 1-minute period so
-// the alarm ticks every minute and we decide whether it matches.
-async function registerAlarms() {
-  // Clear only the check alarm (preserve active snooze alarms)
-  await chrome.alarms.clear('nyonyo|check');
-
+// ── Alarm ─────────────────────────────────────────────────────────────────────
+// Dibuat hanya jika belum ada, supaya ritme tick tidak di-reset tiap storage berubah.
+async function ensureAlarm() {
   const reminders = await getReminders();
-  if (reminders.length === 0) return;
-
-  // One shared alarm ticks every minute; the handler checks all reminders.
-  // Using a single alarm avoids N alarms for N reminders.
-  chrome.alarms.create('nyonyo|check', {
-    delayInMinutes: 0.1,   // first tick in ~6 seconds
-    periodInMinutes: 1
-  });
+  const existing  = await chrome.alarms.get(CHECK_ALARM);
+  if (reminders.length === 0) {
+    if (existing) await chrome.alarms.clear(CHECK_ALARM);
+    return;
+  }
+  if (!existing) {
+    chrome.alarms.create(CHECK_ALARM, { delayInMinutes: 0.1, periodInMinutes: 1 });
+  }
 }
 
-// ── Open / reuse reminder tab ─────────────────────────────────────────────────
-
+// ── Buka popup reminder ───────────────────────────────────────────────────────
 async function openReminderTab(reminder, stage) {
   const params = new URLSearchParams({
     id:    reminder.id,
@@ -73,105 +58,124 @@ async function openReminderTab(reminder, stage) {
     stage: String(stage)
   });
   const url = `${REMINDER_PAGE}?${params.toString()}`;
-  console.log('[NyoNyo BG] openReminderTab → stage', stage, '|', reminder.name, '|', url);
+  console.log('[NyoNyo BG] open stage', stage, '|', reminder.name);
 
-  // Reuse an existing reminder tab if one is open
-  const tabs = await chrome.tabs.query({});
+  // Pakai ulang jendela reminder yang masih terbuka
+  const tabs     = await chrome.tabs.query({});
   const existing = tabs.find(t => t.url && t.url.startsWith(REMINDER_PAGE));
   if (existing) {
-    console.log('[NyoNyo BG] Reusing existing reminder tab id', existing.id);
     await chrome.tabs.update(existing.id, { url, active: true });
-  } else {
-    console.log('[NyoNyo BG] Creating new reminder tab');
-    await chrome.tabs.create({ url, active: false }); // don't forcibly steal focus
+    await chrome.windows.update(existing.windowId, { focused: true, drawAttention: true });
+    return;
+  }
+
+  // Jendela popup baru, langsung fokus (tidak tersembunyi di tab belakang)
+  await chrome.windows.create({
+    url,
+    type: 'popup',
+    width: 520,
+    height: 720,
+    focused: true
+  });
+}
+
+// ── Pemeriksaan jadwal ────────────────────────────────────────────────────────
+// Tahap 1: begitu waktu jadwal tercapai (toleransi WINDOW_MIN menit).
+// Tahap 2 & 3: tiap STAGE_GAP_MIN menit setelah tahap sebelumnya.
+async function checkReminders() {
+  const now     = new Date();
+  const nowMin  = now.getHours() * 60 + now.getMinutes();
+  const today   = todayStr();
+  const reminders = await getReminders();
+  const stages    = await getSession(STAGE_KEY);
+
+  for (const r of reminders) {
+    const [h, m] = String(r.time).split(':').map(Number);
+    const late   = nowMin - (h * 60 + m);   // menit sejak jadwal
+    if (Number.isNaN(late) || late < 0) continue;
+
+    const key = `${r.id}|${today}`;
+    const s   = stages[key] || { stage: 0, at: 0 };
+
+    let next = 0;
+    if (s.stage === 0) {
+      if (late <= WINDOW_MIN) next = 1;
+    } else if (s.stage < 3 && Date.now() - s.at >= STAGE_GAP_MIN * 60000) {
+      next = s.stage + 1;
+    }
+    if (!next) continue;
+
+    stages[key] = { stage: next, at: Date.now() };
+    await setSession(STAGE_KEY, stages);
+    await openReminderTab(r, next);
+    break;   // satu reminder per tick; sisanya di tick berikutnya
   }
 }
 
 // ── Alarm handler ─────────────────────────────────────────────────────────────
-
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (!alarm.name.startsWith('nyonyo|')) return;
-
-  // ── Snooze alarms ──────────────────────────────────────────────
-  if (alarm.name.startsWith('nyonyo|snooze|')) {
-    const snoozes = await new Promise(r =>
-      chrome.storage.session.get(['nyonyo_snoozes'], res => r(res['nyonyo_snoozes'] || {}))
-    );
-    const entry = snoozes[alarm.name];
-    if (entry) {
-      delete snoozes[alarm.name];
-      await new Promise(r => chrome.storage.session.set({ nyonyo_snoozes: snoozes }, r));
-      await openReminderTab(entry.reminder, entry.stage);
-    }
+  if (alarm.name === CHECK_ALARM) {
+    await checkReminders();
     return;
   }
 
-  const now       = new Date();
-  const current   = hhmm(now);
-  const today     = todayStr();
-  const reminders = await getReminders();
-  const stages    = await getStages();
+  if (alarm.name.startsWith('nyonyo|snooze|')) {
+    const snoozes = await getSession(SNOOZE_KEY);
+    const entry   = snoozes[alarm.name];
+    if (!entry) return;
+    delete snoozes[alarm.name];
+    await setSession(SNOOZE_KEY, snoozes);
 
-  for (const r of reminders) {
-    if (r.time !== current) continue;
-
-    const key        = `${r.id}|${today}`;
-    const stage      = (stages[key] || 0) + 1;
-    if (stage > 3) continue;  // already fired 3 times today
-
-    stages[key] = stage;
-    await setStages(stages);
-    await openReminderTab(r, stage);
-    break; // one reminder per alarm tick; others will fire on their own alarm
+    const stage  = Math.min(entry.stage + 1, 3);   // snooze → naik ke tahap berikutnya
+    const stages = await getSession(STAGE_KEY);
+    stages[`${entry.reminder.id}|${todayStr()}`] = { stage, at: Date.now() };
+    await setSession(STAGE_KEY, stages);
+    await openReminderTab(entry.reminder, stage);
   }
 });
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
+console.log('[NyoNyo BG] Service worker started.');
+ensureAlarm();                                   // tiap service worker bangun
+chrome.runtime.onInstalled.addListener(ensureAlarm);
+chrome.runtime.onStartup.addListener(ensureAlarm);
 
-console.log('[NyoNyo BG] Service worker started. REMINDER_PAGE =', REMINDER_PAGE);
-
-// On install or update: register alarms from stored reminders
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('[NyoNyo BG] onInstalled fired — registering alarms');
-  registerAlarms();
-});
-
-// On browser startup: re-register alarms (service workers are restarted)
-chrome.runtime.onStartup.addListener(registerAlarms);
-
-// Re-register whenever the popup (or demo.html) updates storage
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'sync' && changes[STORAGE_KEY]) {
-    registerAlarms();
-  }
+  if (area === 'local' && changes[STORAGE_KEY]) ensureAlarm();
 });
 
-// ── Message handler (from popup or demo.html) ─────────────────────────────────
-// Supports: { type: 'DEMO' } → open reminder.html in demo/stage-1 mode immediately
-
+// ── Pesan dari popup / demo / reminder ────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  console.log('[NyoNyo BG] Message received:', msg);
-  if (msg.type === 'DEMO') {
-    const fakeReminder = { id: 'demo', name: msg.name || 'Demo Reminder', time: hhmm(new Date()) };
-    console.log('[NyoNyo BG] DEMO → opening tab for', fakeReminder.name);
-    openReminderTab(fakeReminder, msg.stage || 1).then(() => sendResponse({ ok: true }));
-    return true;
-  }
-  if (msg.type === 'REGISTER_ALARMS') {
-    registerAlarms().then(() => sendResponse({ ok: true }));
-    return true;
-  }
-  if (msg.type === 'SNOOZE') {
-    const snoozeReminder = { id: msg.id, name: msg.name, time: msg.time };
-    const snoozeStage    = Math.min((msg.stage || 1), 3);
-    chrome.alarms.create(`nyonyo|snooze|${msg.id}`, { delayInMinutes: msg.delayMinutes || 5 });
-    // Store snooze info so the alarm handler knows what to open
-    chrome.storage.session.get(['nyonyo_snoozes'], result => {
-      const snoozes = result['nyonyo_snoozes'] || {};
-      snoozes[`nyonyo|snooze|${msg.id}`] = { reminder: snoozeReminder, stage: snoozeStage };
-      chrome.storage.session.set({ nyonyo_snoozes: snoozes });
-    });
+  (async () => {
+    if (msg.type === 'DEMO') {
+      await openReminderTab(
+        { id: 'demo', name: msg.name || 'Demo Reminder', time: `${pad(new Date().getHours())}:${pad(new Date().getMinutes())}` },
+        msg.stage || 1
+      );
+    } else if (msg.type === 'REGISTER_ALARMS') {
+      await ensureAlarm();
+    } else if (msg.type === 'SNOOZE') {
+      const delay = msg.delayMinutes || 5;
+      const name  = `nyonyo|snooze|${msg.id}`;
+      const stage = Math.min(msg.stage || 1, 3);
+      chrome.alarms.create(name, { delayInMinutes: delay });
+
+      const snoozes = await getSession(SNOOZE_KEY);
+      snoozes[name] = { reminder: { id: msg.id, name: msg.name, time: msg.time }, stage };
+      await setSession(SNOOZE_KEY, snoozes);
+
+      // Tahan eskalasi otomatis sampai snooze selesai
+      const stages = await getSession(STAGE_KEY);
+      stages[`${msg.id}|${todayStr()}`] = { stage, at: Date.now() + delay * 60000 };
+      await setSession(STAGE_KEY, stages);
+    } else if (msg.type === 'DONE') {
+      // User menekan "Mulai Sekarang" → hentikan eskalasi hari ini
+      const stages = await getSession(STAGE_KEY);
+      stages[`${msg.id}|${todayStr()}`] = { stage: 99, at: Date.now() };
+      await setSession(STAGE_KEY, stages);
+      chrome.alarms.clear(`nyonyo|snooze|${msg.id}`);
+    }
     sendResponse({ ok: true });
-    return true;
-  }
+  })();
+  return true;   // respons asinkron
 });
