@@ -6,7 +6,7 @@ const STORAGE_KEY = 'nyonyo_reminders';
 let reminders = [];
 
 // ── Load ──────────────────────────────────────────────────────────────────────
-chrome.storage.sync.get([STORAGE_KEY], result => {
+chrome.storage.local.get([STORAGE_KEY], result => {
   reminders = result[STORAGE_KEY] || [];
   render();
 });
@@ -45,10 +45,14 @@ function deleteReminder(id) {
   persist(() => render());
 }
 
-// ── Persist → chrome.storage.sync ────────────────────────────────────────────
+// ── Persist → chrome.storage.local ───────────────────────────────────────────
 function persist(cb) {
-  chrome.storage.sync.set({ [STORAGE_KEY]: reminders }, () => {
-    // Tell background to re-register alarms
+  chrome.storage.local.set({ [STORAGE_KEY]: reminders }, () => {
+    if (chrome.runtime.lastError) {
+      setStatus('Gagal menyimpan: ' + chrome.runtime.lastError.message);
+      return;
+    }
+    // Pastikan background mendaftarkan alarm
     chrome.runtime.sendMessage({ type: 'REGISTER_ALARMS' });
     if (cb) cb();
   });
